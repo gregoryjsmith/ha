@@ -82,15 +82,10 @@ action:
       _area_entities: "{{ _sel_areas | map('area_entities') | sum(start=[]) }}"
       _device_entities: "{{ _sel_devices | map('device_entities') | sum(start=[]) }}"
       all_light_entities: "{{ (_sel_entities + _area_entities + _device_entities) | unique | select('match','^light\\.') | list }}"
-      ref_entity: "{{ all_light_entities[0] if all_light_entities|length > 0 else none }}"
 
-      # Brightness helpers
-      _ref_bri: "{{ state_attr(ref_entity, 'brightness') if ref_entity else 0 }}"
-      _ref_bri_pct: "{{ ((_ref_bri | float(0)) / 255 * 100) | round(0) }}"
+      # Configs
       _rot_step: "{{ rotate_step_size | default(5) }}"
       _rot_transition: "{{ rotate_transition | default(0.2) }}"
-      rot_up_pct: "{{ [1, [100, _ref_bri_pct + _rot_step] | min] | max }}"
-      rot_down_pct: "{{ [1, [100, _ref_bri_pct - _rot_step] | min] | max }}"
 
   - choose:
       - conditions:
@@ -105,24 +100,38 @@ action:
           - "{{ action in ['hold', 'long'] }}"
         sequence: !input hold_action
 
-      # Rotate Right -> brighten (clamped 1-100%) with smoothing
+      # Rotate Right -> brighten currently-on lights only
       - conditions:
           - "{{ action == 'rotate_right' }}"
-          - "{{ all_light_entities | length > 0 }}"
         sequence:
+          - variables:
+              _on_lights: "{{ expand(all_light_entities) | selectattr('domain','eq','light') | selectattr('state','eq','on') | map(attribute='entity_id') | list }}"
+              _ref: "{{ _on_lights[0] if _on_lights|length > 0 else none }}"
+              _ref_bri: "{{ state_attr(_ref, 'brightness') if _ref else 0 }}"
+              _ref_bri_pct: "{{ ((_ref_bri | float(0)) / 255 * 100) | round(0) }}"
+              _new_pct: "{{ [1, [100, _ref_bri_pct + _rot_step] | min] | max }}"
+          - condition: template
+            value_template: "{{ _on_lights | length > 0 }}"
           - service: light.turn_on
             data:
-              entity_id: "{{ all_light_entities }}"
-              brightness_pct: "{{ rot_up_pct }}"
+              entity_id: "{{ _on_lights }}"
+              brightness_pct: "{{ _new_pct }}"
               transition: "{{ _rot_transition }}"
 
-      # Rotate Left -> dim (clamped 1-100%) with smoothing
+      # Rotate Left -> dim currently-on lights only
       - conditions:
           - "{{ action == 'rotate_left' }}"
-          - "{{ all_light_entities | length > 0 }}"
         sequence:
+          - variables:
+              _on_lights: "{{ expand(all_light_entities) | selectattr('domain','eq','light') | selectattr('state','eq','on') | map(attribute='entity_id') | list }}"
+              _ref: "{{ _on_lights[0] if _on_lights|length > 0 else none }}"
+              _ref_bri: "{{ state_attr(_ref, 'brightness') if _ref else 0 }}"
+              _ref_bri_pct: "{{ ((_ref_bri | float(0)) / 255 * 100) | round(0) }}"
+              _new_pct: "{{ [1, [100, _ref_bri_pct - _rot_step] | min] | max }}"
+          - condition: template
+            value_template: "{{ _on_lights | length > 0 }}"
           - service: light.turn_on
             data:
-              entity_id: "{{ all_light_entities }}"
-              brightness_pct: "{{ rot_down_pct }}"
+              entity_id: "{{ _on_lights }}"
+              brightness_pct: "{{ _new_pct }}"
               transition: "{{ _rot_transition }}"
