@@ -225,7 +225,7 @@ action:
           - service: light.turn_on
             target: !input target_lights
             data:
-              color_temp_kelvin: "{{ (state_attr(target_lights.entity_id, 'color_temp_kelvin') or 3000) + temp_step }}"
+              color_temp_kelvin: "{{ (state_attr(target_lights, 'color_temp_kelvin') or 3000) + temp_step }}"
               transition: "{{ transition }}"
 
       - conditions:
@@ -235,7 +235,7 @@ action:
           - service: light.turn_on
             target: !input target_lights
             data:
-              color_temp_kelvin: "{{ (state_attr(target_lights.entity_id, 'color_temp_kelvin') or 3000) - temp_step }}"
+              color_temp_kelvin: "{{ (state_attr(target_lights, 'color_temp_kelvin') or 3000) - temp_step }}"
               transition: "{{ transition }}"
 
       # Hue Control
@@ -247,8 +247,8 @@ action:
             target: !input target_lights
             data:
               hs_color:
-                - "{{ (state_attr(target_lights.entity_id, 'hs_color')[0] or 0) + hue_step }}"
-                - "{{ state_attr(target_lights.entity_id, 'hs_color')[1] or 100 }}"
+                - "{{ (state_attr(target_lights, 'hs_color')[0] or 0) + hue_step }}"
+                - "{{ state_attr(target_lights, 'hs_color')[1] or 100 }}"
               transition: "{{ transition }}"
 
       - conditions:
@@ -269,8 +269,8 @@ action:
             target: !input target_lights
             data:
               hs_color:
-                - "{{ state_attr(target_lights.entity_id, 'hs_color')[0] or 0 }}"
-                - "{{ (state_attr(target_lights.entity_id, 'hs_color')[1] or 100) + sat_step }}"
+                - "{{ state_attr(target_lights, 'hs_color')[0] or 0 }}"
+                - "{{ (state_attr(target_lights, 'hs_color')[1] or 100) + sat_step }}"
               transition: "{{ transition }}"
 
   # Optional: Log action for debugging
@@ -282,5 +282,3 @@ action:
         Mode: {{ operation_mode }}
         Step Size: {{ step_size }}
         Transition: {{ transition }}
-    target:
-      entity_id: !input target_lights
