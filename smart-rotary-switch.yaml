@@ -84,8 +84,8 @@ action:
       all_light_entities: "{{ (_sel_entities + _area_entities + _device_entities) | unique | select('match','^light\\.') | list }}"
 
       # Configs
-      _rot_transition: "{{ (rotate_transition | float) }}"
       _rot_step: "{{ (rotate_step_size | float) }}"
+      _rot_transition: "{{ (rotate_transition | float) }}"
 
   - choose:
       - conditions:
@@ -109,17 +109,17 @@ action:
               _bri_vals: "{{ expand(_on_lights) | map(attribute='attributes.brightness') | list }}"
               _bri_pcts: "{{ _bri_vals | map('float') | map('mul', 100/255) | map('round', 0) | list }}"
               _max_pct: "{{ (_bri_pcts | max(default=0)) | float }}"
-              _edge_reach: "{{ _max_pct >= (100 - _rot_step) }}"
+              _target_pct: "{{ [1, [100, _max_pct + _rot_step] | min] | max }}"
           - condition: template
             value_template: "{{ _on_lights | length > 0 }}"
           - choose:
               - conditions:
-                  - "{{ _edge_reach }}"
+                  - "{{ _max_pct >= (100 - _rot_step) }}"
                 sequence:
                   - service: light.turn_on
                     data:
                       entity_id: "{{ _on_lights }}"
-                      brightness_pct: 100
+                      brightness_pct: "{{ 100 | int }}"
                       transition: "{{ _rot_transition }}"
             default:
               - service: light.turn_on
@@ -137,17 +137,17 @@ action:
               _bri_vals: "{{ expand(_on_lights) | map(attribute='attributes.brightness') | list }}"
               _bri_pcts: "{{ _bri_vals | map('float') | map('mul', 100/255) | map('round', 0) | list }}"
               _min_pct: "{{ (_bri_pcts | min(default=100)) | float }}"
-              _edge_reach: "{{ _min_pct <= (1 + _rot_step) }}"
+              _target_pct: "{{ [1, [100, _min_pct - _rot_step] | min] | max }}"
           - condition: template
             value_template: "{{ _on_lights | length > 0 }}"
           - choose:
               - conditions:
-                  - "{{ _edge_reach }}"
+                  - "{{ _min_pct <= (1 + _rot_step) }}"
                 sequence:
                   - service: light.turn_on
                     data:
                       entity_id: "{{ _on_lights }}"
-                      brightness_pct: 1
+                      brightness_pct: "{{ 1 | int }}"
                       transition: "{{ _rot_transition }}"
             default:
               - service: light.turn_on
