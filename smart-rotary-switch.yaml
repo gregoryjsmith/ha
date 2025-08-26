@@ -104,7 +104,7 @@ action:
           - "{{ action in ['hold', 'long'] }}"
         sequence: !input hold_action
 
-      # Rotate Right -> brighten currently-on lights only (percentage step with clamp)
+      # Rotate Right -> brighten currently-on lights only (absolute pct with clamp)
       - conditions:
           - "{{ action == 'rotate_right' }}"
         sequence:
@@ -123,16 +123,16 @@ action:
                   - service: light.turn_on
                     data:
                       entity_id: "{{ _on_lights }}"
-                      brightness_pct: "{{ 100 | int }}"
+                      brightness_pct: 100
                       transition: "{{ _rot_transition }}"
             default:
               - service: light.turn_on
                 data:
                   entity_id: "{{ _on_lights }}"
-                  brightness_step_pct: "{{ _rot_step | int }}"
+                  brightness_pct: "{{ _target_pct | int }}"
                   transition: "{{ _rot_transition }}"
 
-      # Rotate Left -> dim currently-on lights only (percentage step with clamp)
+      # Rotate Left -> dim currently-on lights only (absolute pct with clamp)
       - conditions:
           - "{{ action == 'rotate_left' }}"
         sequence:
@@ -151,11 +151,11 @@ action:
                   - service: light.turn_on
                     data:
                       entity_id: "{{ _on_lights }}"
-                      brightness_pct: "{{ 1 | int }}"
+                      brightness_pct: 1
                       transition: "{{ _rot_transition }}"
             default:
               - service: light.turn_on
                 data:
                   entity_id: "{{ _on_lights }}"
-                  brightness_step_pct: "-{{ _rot_step | int }}"
+                  brightness_pct: "{{ _target_pct | int }}"
                   transition: "{{ _rot_transition }}"
