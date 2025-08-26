@@ -159,21 +159,10 @@ action:
       sat_step: "{{ saturation_step_size | default(10) }}"
       transition: "{{ transition_time if transition_time > 0 else default_transition }}"
 
-      # Resolve selected entities from target (entities, areas, devices)
+      # Selected target scopes
       _sel_entities: "{{ target_lights.entity_id | default([]) }}"
       _sel_areas: "{{ target_lights.area_id | default([]) }}"
       _sel_devices: "{{ target_lights.device_id | default([]) }}"
-      _area_entities: "{{ _sel_areas | map('area_entities') | sum(start=[]) }}"
-      _device_entities: "{{ _sel_devices | map('device_entities') | sum(start=[]) }}"
-      _all_entities: "{{ (_sel_entities + _area_entities + _device_entities) | unique }}"
-      on_lights: "{{ expand(_all_entities) | selectattr('domain','eq','light') | selectattr('state','eq','on') | map(attribute='entity_id') | list }}"
-      ref_entity: "{{ on_lights[0] if on_lights|length > 0 else none }}"
-
-      # Clamp brightness to 1-100%
-      _ref_brightness: "{{ state_attr(ref_entity, 'brightness') if ref_entity else none }}"
-      _ref_brightness_pct: "{{ ((_ref_brightness | float(0)) / 255 * 100) | round(0) }}"
-      new_brightness_up_pct: "{{ [1, [100, _ref_brightness_pct + brightness_step] | min] | max }}"
-      new_brightness_down_pct: "{{ [1, [100, _ref_brightness_pct - brightness_step] | min] | max }}"
 
   - choose:
       # Event Mode Actions
@@ -202,97 +191,156 @@ action:
           - "{{ action == 'rotate_right' }}"
         sequence: !input rotate_right_action
 
-      # Command Mode Actions
+      # Command Mode Actions (resolve on-lights at execution time)
       - conditions:
           - "{{ operation_mode == 'command' }}"
           - "{{ action == 'toggle' }}"
-          - "{{ on_lights | length > 0 }}"
         sequence:
+          - variables:
+              _area_entities: "{{ _sel_areas | map('area_entities') | sum(start=[]) }}"
+              _device_entities: "{{ _sel_devices | map('device_entities') | sum(start=[]) }}"
+              _all_entities: "{{ (_sel_entities + _area_entities + _device_entities) | unique }}"
+              _on_lights: "{{ expand(_all_entities) | selectattr('domain','eq','light') | selectattr('state','eq','on') | map(attribute='entity_id') | list }}"
+          - condition: template
+            value_template: "{{ _on_lights | length > 0 }}"
           - service: light.toggle
             data:
-              entity_id: "{{ on_lights }}"
+              entity_id: "{{ _on_lights }}"
               transition: "{{ transition }}"
 
       # Brightness Control
       - conditions:
           - "{{ operation_mode == 'command' }}"
           - "{{ action == 'brightness_step_up' }}"
-          - "{{ on_lights | length > 0 }}"
         sequence:
+          - variables:
+              _area_entities: "{{ _sel_areas | map('area_entities') | sum(start=[]) }}"
+              _device_entities: "{{ _sel_devices | map('device_entities') | sum(start=[]) }}"
+              _all_entities: "{{ (_sel_entities + _area_entities + _device_entities) | unique }}"
+              _on_lights: "{{ expand(_all_entities) | selectattr('domain','eq','light') | selectattr('state','eq','on') | map(attribute='entity_id') | list }}"
+              _ref: "{{ _on_lights[0] if _on_lights|length > 0 else none }}"
+              _ref_bri: "{{ state_attr(_ref, 'brightness') if _ref else 0 }}"
+              _ref_bri_pct: "{{ ((_ref_bri | float(0)) / 255 * 100) | round(0) }}"
+              _new_pct: "{{ [1, [100, _ref_bri_pct + brightness_step] | min] | max }}"
+          - condition: template
+            value_template: "{{ _on_lights | length > 0 }}"
           - service: light.turn_on
             data:
-              entity_id: "{{ on_lights }}"
-              brightness_pct: "{{ new_brightness_up_pct }}"
+              entity_id: "{{ _on_lights }}"
+              brightness_pct: "{{ _new_pct }}"
               transition: "{{ transition }}"
 
       - conditions:
           - "{{ operation_mode == 'command' }}"
           - "{{ action == 'brightness_step_down' }}"
-          - "{{ on_lights | length > 0 }}"
         sequence:
+          - variables:
+              _area_entities: "{{ _sel_areas | map('area_entities') | sum(start=[]) }}"
+              _device_entities: "{{ _sel_devices | map('device_entities') | sum(start=[]) }}"
+              _all_entities: "{{ (_sel_entities + _area_entities + _device_entities) | unique }}"
+              _on_lights: "{{ expand(_all_entities) | selectattr('domain','eq','light') | selectattr('state','eq','on') | map(attribute='entity_id') | list }}"
+              _ref: "{{ _on_lights[0] if _on_lights|length > 0 else none }}"
+              _ref_bri: "{{ state_attr(_ref, 'brightness') if _ref else 0 }}"
+              _ref_bri_pct: "{{ ((_ref_bri | float(0)) / 255 * 100) | round(0) }}"
+              _new_pct: "{{ [1, [100, _ref_bri_pct - brightness_step] | min] | max }}"
+          - condition: template
+            value_template: "{{ _on_lights | length > 0 }}"
           - service: light.turn_on
             data:
-              entity_id: "{{ on_lights }}"
-              brightness_pct: "{{ new_brightness_down_pct }}"
+              entity_id: "{{ _on_lights }}"
+              brightness_pct: "{{ _new_pct }}"
               transition: "{{ transition }}"
 
       # Color Temperature Control
       - conditions:
           - "{{ operation_mode == 'command' }}"
           - "{{ action == 'color_temperature_step_up' }}"
-          - "{{ on_lights | length > 0 }}"
         sequence:
+          - variables:
+              _area_entities: "{{ _sel_areas | map('area_entities') | sum(start=[]) }}"
+              _device_entities: "{{ _sel_devices | map('device_entities') | sum(start=[]) }}"
+              _all_entities: "{{ (_sel_entities + _area_entities + _device_entities) | unique }}"
+              _on_lights: "{{ expand(_all_entities) | selectattr('domain','eq','light') | selectattr('state','eq','on') | map(attribute='entity_id') | list }}"
+              _ref: "{{ _on_lights[0] if _on_lights|length > 0 else none }}"
+          - condition: template
+            value_template: "{{ _on_lights | length > 0 }}"
           - service: light.turn_on
             data:
-              entity_id: "{{ on_lights }}"
-              color_temp_kelvin: "{{ (state_attr(ref_entity, 'color_temp_kelvin') or 3000) + temp_step }}"
+              entity_id: "{{ _on_lights }}"
+              color_temp_kelvin: "{{ (state_attr(_ref, 'color_temp_kelvin') or 3000) + temp_step }}"
               transition: "{{ transition }}"
 
       - conditions:
           - "{{ operation_mode == 'command' }}"
           - "{{ action == 'color_temperature_step_down' }}"
-          - "{{ on_lights | length > 0 }}"
         sequence:
+          - variables:
+              _area_entities: "{{ _sel_areas | map('area_entities') | sum(start=[]) }}"
+              _device_entities: "{{ _sel_devices | map('device_entities') | sum(start=[]) }}"
+              _all_entities: "{{ (_sel_entities + _area_entities + _device_entities) | unique }}"
+              _on_lights: "{{ expand(_all_entities) | selectattr('domain','eq','light') | selectattr('state','eq','on') | map(attribute='entity_id') | list }}"
+              _ref: "{{ _on_lights[0] if _on_lights|length > 0 else none }}"
+          - condition: template
+            value_template: "{{ _on_lights | length > 0 }}"
           - service: light.turn_on
             data:
-              entity_id: "{{ on_lights }}"
-              color_temp_kelvin: "{{ (state_attr(ref_entity, 'color_temp_kelvin') or 3000) - temp_step }}"
+              entity_id: "{{ _on_lights }}"
+              color_temp_kelvin: "{{ (state_attr(_ref, 'color_temp_kelvin') or 3000) - temp_step }}"
               transition: "{{ transition }}"
 
       # Hue Control
       - conditions:
           - "{{ operation_mode == 'command' }}"
           - "{{ action == 'hue_move' }}"
-          - "{{ on_lights | length > 0 }}"
         sequence:
+          - variables:
+              _area_entities: "{{ _sel_areas | map('area_entities') | sum(start=[]) }}"
+              _device_entities: "{{ _sel_devices | map('device_entities') | sum(start=[]) }}"
+              _all_entities: "{{ (_sel_entities + _area_entities + _device_entities) | unique }}"
+              _on_lights: "{{ expand(_all_entities) | selectattr('domain','eq','light') | selectattr('state','eq','on') | map(attribute='entity_id') | list }}"
+              _ref: "{{ _on_lights[0] if _on_lights|length > 0 else none }}"
+          - condition: template
+            value_template: "{{ _on_lights | length > 0 }}"
           - service: light.turn_on
             data:
-              entity_id: "{{ on_lights }}"
+              entity_id: "{{ _on_lights }}"
               hs_color:
-                - "{{ (state_attr(ref_entity, 'hs_color')[0] or 0) + hue_step }}"
-                - "{{ state_attr(ref_entity, 'hs_color')[1] or 100 }}"
+                - "{{ (state_attr(_ref, 'hs_color')[0] or 0) + hue_step }}"
+                - "{{ state_attr(_ref, 'hs_color')[1] or 100 }}"
               transition: "{{ transition }}"
 
       - conditions:
           - "{{ operation_mode == 'command' }}"
           - "{{ action == 'hue_stop' }}"
-          - "{{ on_lights | length > 0 }}"
         sequence:
-          # Stop hue movement - no action needed as it's already stopped
+          - variables:
+              _area_entities: "{{ _sel_areas | map('area_entities') | sum(start=[]) }}"
+              _device_entities: "{{ _sel_devices | map('device_entities') | sum(start=[]) }}"
+              _all_entities: "{{ (_sel_entities + _area_entities + _device_entities) | unique }}"
+              _on_lights: "{{ expand(_all_entities) | selectattr('domain','eq','light') | selectattr('state','eq','on') | map(attribute='entity_id') | list }}"
+          - condition: template
+            value_template: "{{ _on_lights | length > 0 }}"
           - service: light.turn_on
             data:
-              entity_id: "{{ on_lights }}"
+              entity_id: "{{ _on_lights }}"
 
       # Saturation Control
       - conditions:
           - "{{ operation_mode == 'command' }}"
           - "{{ action == 'saturation_move' }}"
-          - "{{ on_lights | length > 0 }}"
         sequence:
+          - variables:
+              _area_entities: "{{ _sel_areas | map('area_entities') | sum(start=[]) }}"
+              _device_entities: "{{ _sel_devices | map('device_entities') | sum(start=[]) }}"
+              _all_entities: "{{ (_sel_entities + _area_entities + _device_entities) | unique }}"
+              _on_lights: "{{ expand(_all_entities) | selectattr('domain','eq','light') | selectattr('state','eq','on') | map(attribute='entity_id') | list }}"
+              _ref: "{{ _on_lights[0] if _on_lights|length > 0 else none }}"
+          - condition: template
+            value_template: "{{ _on_lights | length > 0 }}"
           - service: light.turn_on
             data:
-              entity_id: "{{ on_lights }}"
+              entity_id: "{{ _on_lights }}"
               hs_color:
-                - "{{ state_attr(ref_entity, 'hs_color')[0] or 0 }}"
-                - "{{ (state_attr(ref_entity, 'hs_color')[1] or 100) + sat_step }}"
+                - "{{ state_attr(_ref, 'hs_color')[0] or 0 }}"
+                - "{{ (state_attr(_ref, 'hs_color')[1] or 100) + sat_step }}"
               transition: "{{ transition }}"
