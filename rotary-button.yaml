@@ -1,6 +1,5 @@
 blueprint:
-
-  name: ZHAZigbee2MQTT - Tuya - TS004F Smart Knob - Custom Actions
+  name: Zigbee2MQTT - Tuya - TS004F Smart Knob - Custom Actions
 
   description: >-
     This automation adds triggers for all actions of the Tuya TS004F rotary dial remote control.
@@ -34,14 +33,11 @@ blueprint:
           mode: box
           min: 1
           max: 100
-    remote:
-      name: Tuya - TS004F Smart Knob
-      description: Select the remote control you want to use.
+    mqtt_topic:
+      name: Zigbee2MQTT topic
+      description: e.g. zigbee2mqtt/your_knob (must publish JSON with action fields)
       selector:
-        device:
-          integration: zha
-          manufacturer: _TZ3000_qja6nq5z
-          model: TS004F
+        text:
     light:
       name: Light (Command/Dimmer mode)
       selector:
@@ -84,149 +80,153 @@ max: !input max
 max_exceeded: silent
 
 trigger:
-  - platform: event
-    event_type: zha_event
-    event_data:
-      device_id: !input remote
+  - platform: mqtt
+    topic: !input mqtt_topic
 
 action:
   - variables:
       light: !input light
-      command: "{{ trigger.event.data.command }}"
-      cluster_id: "{{ trigger.event.data.cluster_id }}"
-      endpoint_id: "{{ trigger.event.data.endpoint_id }}"
-      args: "{{ trigger.event.data.args }}"
-      direction: "{% if trigger.event.data.args[0] == 0 %} 0 {% elif trigger.event.data.args[0] == 1 %} 1 {% elif trigger.event.data.args[0] == 3 %} 3 {% endif %}"
-      value: "{% if trigger.event.data.args[1] %} {{ trigger.event.data.args[1] / 2 }} {% endif %}"
-      speed: "{% if trigger.event.data.args[2] == 1 %} 0.5 {% else %} 0 {% endif %}"
+      # Prefer Zigbee2MQTT JSON payload fields; fall back to raw payload string
+      payload_obj: "{{ trigger.payload_json if trigger.payload_json is defined else {} }}"
+      command: "{{ payload_obj.action | default(trigger.payload) }}"
+      # Map common Zigbee2MQTT step/hue/temp fields
+      step_size: "{{ payload_obj.action_step_size | default(payload_obj.action_step) | default(0) }}"
+      step_direction: "{{ payload_obj.action_step_direction | default(payload_obj.action_direction) | default('') }}"
+      transition_time_ds: "{{ payload_obj.action_transition_time | default(0) }}"
+      hue_move: "{{ payload_obj.action_move | default(0) }}"
+      color_temp_delta: "{{ payload_obj.action_color_temperature_delta | default(0) }}"
+      direction: >-
+        {% if step_direction in ['up','right','increase'] %} 0
+        {% elif step_direction in ['down','left','decrease'] %} 1
+        {% elif step_direction in ['warm'] %} 3
+        {% else %}
+        {% if command in ['brightness_step_up','color_temperature_step_up'] %} 0
+        {% elif command in ['brightness_step_down','color_temperature_step_down'] %} 1
+        {% else %}
+        {% endif %}
+        {% endif %}
+      value: >-
+        {% if step_size %} {{ (step_size | float) / 2 }}
+        {% elif color_temp_delta %} {{ color_temp_delta | float }}
+        {% else %} 0
+        {% endif %}
+      speed: >-
+        {% if transition_time_ds %} {{ (transition_time_ds | float) / 10 }}
+        {% else %} 0
+        {% endif %}
 
   - choose:
+      # Command Mode
+      - conditions:
+          - "{{ command in ['single'] }}"
+        sequence: !input toggle
 
-    # Command Mode
-    - conditions:
-        - "{{ command == 'toggle' }}"
-        - "{{ cluster_id == 6 }}"
-        - "{{ endpoint_id == 1 }}"
-      sequence: !input toggle
+      # Command Mode: Dimming
+      - conditions:
+          - "{{ command in ['brightness_step_up'] }}"
+          - "{{ direction == 0 }}"
+        sequence:
+          - repeat:
+              while:
+                - condition: template
+                  value_template: "{{ repeat.index < 2 }}"
+              sequence:
+                - service_template: light.turn_on
+                  target: !input light
+                  data_template:
+                    brightness_step_pct: "{{ value }}"
+                    transition: "{{ speed }}"
+      - conditions:
+          - "{{ command in ['brightness_step_down'] }}"
+          - "{{ direction == 1 }}"
+        sequence:
+          - repeat:
+              while:
+                - condition: template
+                  value_template: "{{ repeat.index < 2 }}"
+              sequence:
+                - service_template: light.turn_on
+                  target: !input light
+                  data_template:
+                    brightness_step_pct: "{{ - value }}"
+                    transition: "{{ speed }}"
 
-    # Command Mode: Dimming
-    - conditions:
-        - "{{ command == 'step' }}"
-        - "{{ cluster_id == 8 }}"
-        - "{{ endpoint_id == 1 }}"
-        - "{{ direction == 0 }}"
-      sequence:
-        - repeat:
-            while:
-              - condition: template
-                value_template: "{{ repeat.index < 2 }}"
-            sequence:
-              - service_template: light.turn_on
-                target: !input light
-                data_template:
-                  brightness_step_pct: "{{ value }}"
-                  transition: "{{ speed }}"
-    - conditions:
-        - "{{ command == 'step' }}"
-        - "{{ cluster_id == 8 }}"
-        - "{{ endpoint_id == 1 }}"
-        - "{{ direction == 1 }}"
-      sequence:
-        - repeat:
-            while:
-              - condition: template
-                value_template: "{{ repeat.index < 2 }}"
-            sequence:
-              - service_template: light.turn_on
-                target: !input light
-                data_template:
-                  brightness_step_pct: "{{ - value }}"
-                  transition: "{{ speed }}"
+      # Command Mode: Color Temperature
+      - conditions:
+          - "{{ command in ['step_color_temp','color_temperature_step_down'] }}"
+          - "{{ direction == 1 }}"
+        sequence:
+          - repeat:
+              while:
+                - condition: template
+                  value_template: "{{ repeat.index < 2 }}"
+              sequence:
+                - service_template: light.turn_on
+                  target: !input light
+                  data_template:
+                    color_temp: "{{ ( state_attr( light.entity_id, 'color_temp' ) or 300 ) + value }}"
+                    transition: "{{ speed }}"
+      - conditions:
+          - "{{ command in ['step_color_temp','color_temperature_step_up'] }}"
+          - "{{ direction == 3 or direction == 0 }}"
+        sequence:
+          - repeat:
+              while:
+                - condition: template
+                  value_template: "{{ repeat.index < 2 }}"
+              sequence:
+                - service_template: light.turn_on
+                  target: !input light
+                  data_template:
+                    color_temp: "{{ ( state_attr( light.entity_id, 'color_temp' ) or 300 ) - value }}"
+                    transition: "{{ speed }}"
 
-    # Command Mode: Color Temperature
-    - conditions:
-        - "{{ command == 'step_color_temp' }}"
-        - "{{ cluster_id == 768 }}"
-        - "{{ endpoint_id == 1 }}"
-        - "{{ direction == 1 }}"
-      sequence:
-        - repeat:
-            while:
-              - condition: template
-                value_template: "{{ repeat.index < 2 }}"
-            sequence:
-              - service_template: light.turn_on
-                target: !input light
-                data_template:
-                  color_temp: "{{ ( state_attr( light.entity_id, 'color_temp' ) or 300 ) + value }}"
-                  transition: "{{ speed }}"
-    - conditions:
-        - "{{ command == 'step_color_temp' }}"
-        - "{{ cluster_id == 768 }}"
-        - "{{ endpoint_id == 1 }}"
-        - "{{ direction == 3 }}"
-      sequence:
-        - repeat:
-            while:
-              - condition: template
-                value_template: "{{ repeat.index < 2 }}"
-            sequence:
-              - service_template: light.turn_on
-                target: !input light
-                data_template:
-                  color_temp: "{{ ( state_attr( light.entity_id, 'color_temp' ) or 300 ) - value }}"
-                  transition: "{{ speed }}"
+      # Command Mode: Color Hue
+      - conditions:
+          - "{{ command in ['hue_move'] }}"
+        sequence:
+          - repeat:
+              while:
+                - condition: template
+                  value_template: "{{ repeat.index < 24 }}"
+              sequence:
+                - service_template: light.turn_on
+                  target: !input light
+                  data_template:
+                    hs_color:
+                      - "{{ ( value + (state_attr( light.entity_id , 'hs_color' )[0] or 0)) % 360 }}"
+                      - 100
+                    transition: 0.5
+                - delay:
+                    hours: 0
+                    minutes: 0
+                    seconds: 1
+                    milliseconds: 0
+      - conditions:
+          - "{{ command in ['stop'] }}"
+        sequence:
 
-    # Command Mode: Color Hue
-    - conditions:
-        - "{{ command == 'move_hue' }}"
-        - "{{ cluster_id == 768 }}"
-        - "{{ endpoint_id == 1 }}"
-      sequence:
-        - repeat:
-            while:
-              - condition: template
-                value_template: "{{ repeat.index < 24 }}"
-            sequence:
-              - service_template: light.turn_on
-                target: !input light
-                data_template:
-                  hs_color:
-                    - "{{ ( value + (state_attr( light.entity_id , 'hs_color' )[0] or 0)) % 360 }}"
-                    - 100
-                  transition: 0.5
-              - delay:
-                  hours: 0
-                  minutes: 0
-                  seconds: 1
-                  milliseconds: 0
-    - conditions:
-        - "{{ command == 'stop_move_step' }}"
-        - "{{ cluster_id == 768 }}"
-        - "{{ endpoint_id == 1 }}"
-      sequence:
+      # Event mode: Short Press
+      - conditions:
+          - "{{ command in ['single'] }}"
+        sequence: !input press_short
 
-    # Event mode: Short Press
-    - conditions:
-        - "{{ command == 'remote_button_short_press' }}"
-      sequence: !input press_short
+      # Event mode: Double Press
+      - conditions:
+          - "{{ command in ['double'] }}"
+        sequence: !input press_double
 
-    # Event mode: Double Press
-    - conditions:
-        - "{{ command == 'remote_button_double_press' }}"
-      sequence: !input press_double
+      # Event mode: Long Press
+      - conditions:
+          - "{{ command in ['hold','long'] }}"
+        sequence: !input press_long
 
-    # Event mode: Long Press
-    - conditions:
-        - "{{ command == 'remote_button_long_press' }}"
-      sequence: !input press_long
+      # Event mode: Rotate Left
+      - conditions:
+          - "{{ command in ['left','rotate_left'] }}"
+        sequence: !input rotate_left
 
-    # Event mode: Rotate Left
-    - conditions:
-        - "{{ command == 'left' }}"
-      sequence: !input rotate_left
-
-    # Event mode: Rotate Right
-    - conditions:
-        - "{{ command == 'right' }}"
-      sequence: !input rotate_right
+      # Event mode: Rotate Right
+      - conditions:
+          - "{{ command in ['right','rotate_right'] }}"
+        sequence: !input rotate_right
