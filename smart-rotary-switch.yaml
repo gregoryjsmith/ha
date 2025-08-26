@@ -83,9 +83,13 @@ action:
       _device_entities: "{{ _sel_devices | map('device_entities') | sum(start=[]) }}"
       all_light_entities: "{{ (_sel_entities + _area_entities + _device_entities) | unique | select('match','^light\\.') | list }}"
 
+      # Bind inputs to variables (for use in templates)
+      _rot_step_input: !input rotate_step_size
+      _rot_transition_input: !input rotate_transition
+
       # Configs
-      _rot_step: "{{ (rotate_step_size | float) }}"
-      _rot_transition: "{{ (rotate_transition | float) }}"
+      _rot_step: "{{ (_rot_step_input | float) }}"
+      _rot_transition: "{{ (_rot_transition_input | float) }}"
 
   - choose:
       - conditions:
