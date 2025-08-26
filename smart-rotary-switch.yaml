@@ -75,13 +75,8 @@ action:
       action: "{{ payload.action }}"
       lights: !input target_lights
 
-      # Resolve selected entities from target (entities, areas, devices)
-      _sel_entities: "{{ lights.entity_id | default([]) }}"
-      _sel_areas: "{{ lights.area_id | default([]) }}"
-      _sel_devices: "{{ lights.device_id | default([]) }}"
-      _area_entities: "{{ _sel_areas | map('area_entities') | sum(start=[]) }}"
-      _device_entities: "{{ _sel_devices | map('device_entities') | sum(start=[]) }}"
-      all_light_entities: "{{ (_sel_entities + _area_entities + _device_entities) | unique | select('match','^light\\.') | list }}"
+      # Resolve selected entity IDs only (avoid area/device aggregation to prevent type errors)
+      all_light_entities: "{{ (lights.entity_id | default([])) | select('match','^light\\.') | list }}"
 
       # Bind inputs to variables (for use in templates)
       _rot_step_input: !input rotate_step_size
