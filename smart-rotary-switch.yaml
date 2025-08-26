@@ -84,8 +84,8 @@ action:
       all_light_entities: "{{ (_sel_entities + _area_entities + _device_entities) | unique | select('match','^light\\.') | list }}"
 
       # Configs
-      _rot_step: "{{ rotate_step_size | default(5) }}"
-      _rot_transition: "{{ rotate_transition | default(0.2) }}"
+      _rot_step: "{{ (rotate_step_size | float) }}"
+      _rot_transition: "{{ (rotate_transition | float) }}"
 
   - choose:
       - conditions:
@@ -106,17 +106,27 @@ action:
         sequence:
           - variables:
               _on_lights: "{{ expand(all_light_entities) | selectattr('domain','eq','light') | selectattr('state','eq','on') | map(attribute='entity_id') | list }}"
-              _ref: "{{ _on_lights[0] if _on_lights|length > 0 else none }}"
-              _ref_bri: "{{ state_attr(_ref, 'brightness') if _ref else 0 }}"
-              _ref_bri_pct: "{{ ((_ref_bri | float(0)) / 255 * 100) | round(0) }}"
-              _new_pct: "{{ [1, [100, _ref_bri_pct + _rot_step] | min] | max }}"
+              _bri_vals: "{{ expand(_on_lights) | map(attribute='attributes.brightness') | list }}"
+              _bri_pcts: "{{ _bri_vals | map('float') | map('mul', 100/255) | map('round', 0) | list }}"
+              _max_pct: "{{ (_bri_pcts | max(default=0)) | float }}"
+              _target_pct: "{{ [1, [100, _max_pct + _rot_step] | min] | max }}"
           - condition: template
             value_template: "{{ _on_lights | length > 0 }}"
-          - service: light.turn_on
-            data:
-              entity_id: "{{ _on_lights }}"
-              brightness_pct: "{{ _new_pct }}"
-              transition: "{{ _rot_transition }}"
+          - choose:
+              - conditions:
+                  - "{{ _max_pct >= (100 - _rot_step) }}"
+                sequence:
+                  - service: light.turn_on
+                    data:
+                      entity_id: "{{ _on_lights }}"
+                      brightness_pct: "{{ 100 | int }}"
+                      transition: "{{ _rot_transition }}"
+            default:
+              - service: light.turn_on
+                data:
+                  entity_id: "{{ _on_lights }}"
+                  brightness_step_pct: "{{ _rot_step | int }}"
+                  transition: "{{ _rot_transition }}"
 
       # Rotate Left -> dim currently-on lights only
       - conditions:
@@ -124,14 +134,24 @@ action:
         sequence:
           - variables:
               _on_lights: "{{ expand(all_light_entities) | selectattr('domain','eq','light') | selectattr('state','eq','on') | map(attribute='entity_id') | list }}"
-              _ref: "{{ _on_lights[0] if _on_lights|length > 0 else none }}"
-              _ref_bri: "{{ state_attr(_ref, 'brightness') if _ref else 0 }}"
-              _ref_bri_pct: "{{ ((_ref_bri | float(0)) / 255 * 100) | round(0) }}"
-              _new_pct: "{{ [1, [100, _ref_bri_pct - _rot_step] | min] | max }}"
+              _bri_vals: "{{ expand(_on_lights) | map(attribute='attributes.brightness') | list }}"
+              _bri_pcts: "{{ _bri_vals | map('float') | map('mul', 100/255) | map('round', 0) | list }}"
+              _min_pct: "{{ (_bri_pcts | min(default=100)) | float }}"
+              _target_pct: "{{ [1, [100, _min_pct - _rot_step] | min] | max }}"
           - condition: template
             value_template: "{{ _on_lights | length > 0 }}"
-          - service: light.turn_on
-            data:
-              entity_id: "{{ _on_lights }}"
-              brightness_pct: "{{ _new_pct }}"
-              transition: "{{ _rot_transition }}"
+          - choose:
+              - conditions:
+                  - "{{ _min_pct <= (1 + _rot_step) }}"
+                sequence:
+                  - service: light.turn_on
+                    data:
+                      entity_id: "{{ _on_lights }}"
+                      brightness_pct: "{{ 1 | int }}"
+                      transition: "{{ _rot_transition }}"
+            default:
+              - service: light.turn_on
+                data:
+                  entity_id: "{{ _on_lights }}"
+                  brightness_step_pct: "-{{ _rot_step | int }}"
+                  transition: "{{ _rot_transition }}"
