@@ -2,7 +2,7 @@ blueprint:
   name: Smart Rotary Switch (Event Mode) - Custom Click Actions
   description: >-
     Event-mode only automation for smart rotary switches using Zigbee2MQTT.
-    Lets you choose what to do for single, double, and hold actions.
+    Lets you choose what to do for single, double, and hold actions, and dims/brightens on rotation.
 
   domain: automation
 
@@ -40,6 +40,27 @@ blueprint:
         action:
       default: []
 
+    rotate_step_size:
+      name: Rotate Step Size (%)
+      description: Brightness change per rotate event (1-50)
+      default: 5
+      selector:
+        number:
+          min: 1
+          max: 50
+          unit_of_measurement: "%"
+
+    rotate_transition:
+      name: Rotate Transition (s)
+      description: Smoothing transition time applied to rotate changes
+      default: 0.2
+      selector:
+        number:
+          min: 0
+          max: 5
+          step: 0.05
+          unit_of_measurement: "s"
+
 mode: restart
 max: 10
 max_exceeded: silent
@@ -54,6 +75,23 @@ action:
       action: "{{ payload.action }}"
       lights: !input target_lights
 
+      # Resolve selected entities from target (entities, areas, devices)
+      _sel_entities: "{{ lights.entity_id | default([]) }}"
+      _sel_areas: "{{ lights.area_id | default([]) }}"
+      _sel_devices: "{{ lights.device_id | default([]) }}"
+      _area_entities: "{{ _sel_areas | map('area_entities') | sum(start=[]) }}"
+      _device_entities: "{{ _sel_devices | map('device_entities') | sum(start=[]) }}"
+      all_light_entities: "{{ (_sel_entities + _area_entities + _device_entities) | unique | select('match','^light\\.') | list }}"
+      ref_entity: "{{ all_light_entities[0] if all_light_entities|length > 0 else none }}"
+
+      # Brightness helpers
+      _ref_bri: "{{ state_attr(ref_entity, 'brightness') if ref_entity else 0 }}"
+      _ref_bri_pct: "{{ ((_ref_bri | float(0)) / 255 * 100) | round(0) }}"
+      _rot_step: "{{ rotate_step_size | default(5) }}"
+      _rot_transition: "{{ rotate_transition | default(0.2) }}"
+      rot_up_pct: "{{ [1, [100, _ref_bri_pct + _rot_step] | min] | max }}"
+      rot_down_pct: "{{ [1, [100, _ref_bri_pct - _rot_step] | min] | max }}"
+
   - choose:
       - conditions:
           - "{{ action == 'single' }}"
@@ -66,3 +104,25 @@ action:
       - conditions:
           - "{{ action in ['hold', 'long'] }}"
         sequence: !input hold_action
+
+      # Rotate Right -> brighten (clamped 1-100%) with smoothing
+      - conditions:
+          - "{{ action == 'rotate_right' }}"
+          - "{{ all_light_entities | length > 0 }}"
+        sequence:
+          - service: light.turn_on
+            data:
+              entity_id: "{{ all_light_entities }}"
+              brightness_pct: "{{ rot_up_pct }}"
+              transition: "{{ _rot_transition }}"
+
+      # Rotate Left -> dim (clamped 1-100%) with smoothing
+      - conditions:
+          - "{{ action == 'rotate_left' }}"
+          - "{{ all_light_entities | length > 0 }}"
+        sequence:
+          - service: light.turn_on
+            data:
+              entity_id: "{{ all_light_entities }}"
+              brightness_pct: "{{ rot_down_pct }}"
+              transition: "{{ _rot_transition }}"
