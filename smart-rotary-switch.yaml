@@ -75,8 +75,8 @@ action:
       action: "{{ payload.action }}"
       lights: !input target_lights
 
-      # Resolve selected entity IDs only (avoid area/device aggregation to prevent type errors)
-      all_light_entities: "{{ (lights.entity_id | default([])) | select('match','^light\\.') | list }}"
+      # Resolve selected light entity IDs using expand to avoid type issues
+      all_light_entities: "{{ expand(lights.entity_id | default([])) | selectattr('domain','eq','light') | map(attribute='entity_id') | list }}"
 
       # Bind inputs to variables (for use in templates)
       _rot_step_input: !input rotate_step_size
