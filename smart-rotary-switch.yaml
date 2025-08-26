@@ -85,6 +85,7 @@ action:
 
       # Configs
       _rot_transition: "{{ (rotate_transition | float) }}"
+      _rot_step: "{{ (rotate_step_size | float) }}"
 
   - choose:
       - conditions:
@@ -99,56 +100,58 @@ action:
           - "{{ action in ['hold', 'long'] }}"
         sequence: !input hold_action
 
-      # Rotate Right -> jump to next level (1,64,128,191,255) for on lights
+      # Rotate Right -> brighten currently-on lights only (percentage step with clamp)
       - conditions:
           - "{{ action == 'rotate_right' }}"
         sequence:
           - variables:
               _on_lights: "{{ expand(all_light_entities) | selectattr('domain','eq','light') | selectattr('state','eq','on') | map(attribute='entity_id') | list }}"
-              _ref: "{{ _on_lights[0] if _on_lights|length > 0 else none }}"
-              _bri: "{{ state_attr(_ref, 'brightness') if _ref else 0 }}"
-              _lvl_idx: >-
-                {% set b = _bri | int(0) %}
-                {% if b <= 1 %} 0
-                {% elif b <= 64 %} 1
-                {% elif b <= 128 %} 2
-                {% elif b <= 191 %} 3
-                {% else %} 4
-                {% endif %}
-              _next_idx: "{{ [4, _lvl_idx + 1] | min }}"
-              _levels: "{{ [1,64,128,191,255] }}"
-              _target_bri: "{{ _levels[_next_idx] }}"
+              _bri_vals: "{{ expand(_on_lights) | map(attribute='attributes.brightness') | list }}"
+              _bri_pcts: "{{ _bri_vals | map('float') | map('mul', 100/255) | map('round', 0) | list }}"
+              _max_pct: "{{ (_bri_pcts | max(default=0)) | float }}"
+              _edge_reach: "{{ _max_pct >= (100 - _rot_step) }}"
           - condition: template
             value_template: "{{ _on_lights | length > 0 }}"
-          - service: light.turn_on
-            data:
-              entity_id: "{{ _on_lights }}"
-              brightness: "{{ _target_bri | int }}"
-              transition: "{{ _rot_transition }}"
+          - choose:
+              - conditions:
+                  - "{{ _edge_reach }}"
+                sequence:
+                  - service: light.turn_on
+                    data:
+                      entity_id: "{{ _on_lights }}"
+                      brightness_pct: 100
+                      transition: "{{ _rot_transition }}"
+            default:
+              - service: light.turn_on
+                data:
+                  entity_id: "{{ _on_lights }}"
+                  brightness_step_pct: "{{ _rot_step | int }}"
+                  transition: "{{ _rot_transition }}"
 
-      # Rotate Left -> drop to previous level (1,64,128,191,255) for on lights
+      # Rotate Left -> dim currently-on lights only (percentage step with clamp)
       - conditions:
           - "{{ action == 'rotate_left' }}"
         sequence:
           - variables:
               _on_lights: "{{ expand(all_light_entities) | selectattr('domain','eq','light') | selectattr('state','eq','on') | map(attribute='entity_id') | list }}"
-              _ref: "{{ _on_lights[0] if _on_lights|length > 0 else none }}"
-              _bri: "{{ state_attr(_ref, 'brightness') if _ref else 0 }}"
-              _lvl_idx: >-
-                {% set b = _bri | int(0) %}
-                {% if b <= 1 %} 0
-                {% elif b <= 64 %} 1
-                {% elif b <= 128 %} 2
-                {% elif b <= 191 %} 3
-                {% else %} 4
-                {% endif %}
-              _prev_idx: "{{ [0, _lvl_idx - 1] | max }}"
-              _levels: "{{ [1,64,128,191,255] }}"
-              _target_bri: "{{ _levels[_prev_idx] }}"
+              _bri_vals: "{{ expand(_on_lights) | map(attribute='attributes.brightness') | list }}"
+              _bri_pcts: "{{ _bri_vals | map('float') | map('mul', 100/255) | map('round', 0) | list }}"
+              _min_pct: "{{ (_bri_pcts | min(default=100)) | float }}"
+              _edge_reach: "{{ _min_pct <= (1 + _rot_step) }}"
           - condition: template
             value_template: "{{ _on_lights | length > 0 }}"
-          - service: light.turn_on
-            data:
-              entity_id: "{{ _on_lights }}"
-              brightness: "{{ _target_bri | int }}"
-              transition: "{{ _rot_transition }}"
+          - choose:
+              - conditions:
+                  - "{{ _edge_reach }}"
+                sequence:
+                  - service: light.turn_on
+                    data:
+                      entity_id: "{{ _on_lights }}"
+                      brightness_pct: 1
+                      transition: "{{ _rot_transition }}"
+            default:
+              - service: light.turn_on
+                data:
+                  entity_id: "{{ _on_lights }}"
+                  brightness_step_pct: "-{{ _rot_step | int }}"
+                  transition: "{{ _rot_transition }}"
