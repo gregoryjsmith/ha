@@ -1,0 +1,286 @@
+blueprint:
+  name: Smart Rotary Switch - Complete Control
+  description: >-
+    A comprehensive automation blueprint for smart rotary switches that supports all common actions:
+    toggle, brightness control, color temperature control, saturation/hue control, button presses,
+    and rotation. Works with Zigbee2MQTT devices that publish action events.
+
+    Features:
+    - Button actions: single, double, hold
+    - Rotation: left, right
+    - Brightness control: step up/down with configurable step size
+    - Color temperature control: step up/down
+    - Color control: saturation and hue movement
+    - Configurable transition times and rates
+    - Support for both command and event modes
+
+  domain: automation
+
+  input:
+    # Basic Configuration
+    mqtt_topic:
+      name: MQTT Topic
+      description: The Zigbee2MQTT topic for your rotary switch (e.g., zigbee2mqtt/rotary_switch)
+      selector:
+        text:
+
+    operation_mode:
+      name: Operation Mode
+      description: Choose between command mode (group control) or event mode (individual clicks)
+      default: event
+      selector:
+        select:
+          options:
+            - command
+            - event
+
+    # Target Devices
+    target_lights:
+      name: Target Lights
+      description: Lights to control with the rotary switch
+      selector:
+        target:
+          entity:
+            domain: light
+
+    # Button Actions (Event Mode)
+    single_press_action:
+      name: Single Press Action
+      description: Action to perform on single button press
+      selector:
+        action:
+      default: []
+
+    double_press_action:
+      name: Double Press Action
+      description: Action to perform on double button press
+      selector:
+        action:
+      default: []
+
+    hold_action:
+      name: Hold Action
+      description: Action to perform on button hold
+      selector:
+        action:
+      default: []
+
+    # Rotation Actions (Event Mode)
+    rotate_left_action:
+      name: Rotate Left Action
+      description: Action to perform when rotating left
+      selector:
+        action:
+      default: []
+
+    rotate_right_action:
+      name: Rotate Right Action
+      description: Action to perform when rotating right
+      selector:
+        action:
+      default: []
+
+    # Brightness Control (Command Mode)
+    brightness_step_size:
+      name: Brightness Step Size
+      description: Percentage to change brightness by (1-100)
+      default: 10
+      selector:
+        number:
+          min: 1
+          max: 100
+          unit_of_measurement: "%"
+
+    # Color Temperature Control (Command Mode)
+    color_temp_step_size:
+      name: Color Temperature Step Size
+      description: Kelvin to change color temperature by
+      default: 50
+      selector:
+        number:
+          min: 10
+          max: 200
+          unit_of_measurement: "K"
+
+    # Color Control (Command Mode)
+    hue_step_size:
+      name: Hue Step Size
+      description: Degrees to change hue by (1-360)
+      default: 30
+      selector:
+        number:
+          min: 1
+          max: 360
+          unit_of_measurement: "°"
+
+    saturation_step_size:
+      name: Saturation Step Size
+      description: Percentage to change saturation by (1-100)
+      default: 10
+      selector:
+        number:
+          min: 1
+          max: 100
+          unit_of_measurement: "%"
+
+    # Transition Settings
+    default_transition:
+      name: Default Transition Time
+      description: Default transition time in seconds
+      default: 0.5
+      selector:
+        number:
+          min: 0
+          max: 10
+          step: 0.1
+          unit_of_measurement: "s"
+
+mode: restart
+max: 10
+max_exceeded: silent
+
+trigger:
+  - platform: mqtt
+    topic: !input mqtt_topic
+
+action:
+  - variables:
+      # Parse MQTT payload
+      payload: "{{ trigger.payload_json if trigger.payload_json is defined else {} }}"
+      action: "{{ payload.action }}"
+      step_size: "{{ payload.action_step_size | default(0) }}"
+      transition_time: "{{ payload.action_transition_time | default(0) }}"
+      action_rate: "{{ payload.action_rate | default(0) }}"
+
+      # Use configured values or defaults
+      brightness_step: "{{ brightness_step_size | default(10) }}"
+      temp_step: "{{ color_temp_step_size | default(50) }}"
+      hue_step: "{{ hue_step_size | default(30) }}"
+      sat_step: "{{ saturation_step_size | default(10) }}"
+      transition: "{{ transition_time if transition_time > 0 else default_transition }}"
+
+  - choose:
+      # Event Mode Actions
+      - conditions:
+          - "{{ operation_mode == 'event' }}"
+          - "{{ action == 'single' }}"
+        sequence: !input single_press_action
+
+      - conditions:
+          - "{{ operation_mode == 'event' }}"
+          - "{{ action == 'double' }}"
+        sequence: !input double_press_action
+
+      - conditions:
+          - "{{ operation_mode == 'event' }}"
+          - "{{ action in ['hold', 'long'] }}"
+        sequence: !input hold_action
+
+      - conditions:
+          - "{{ operation_mode == 'event' }}"
+          - "{{ action == 'rotate_left' }}"
+        sequence: !input rotate_left_action
+
+      - conditions:
+          - "{{ operation_mode == 'event' }}"
+          - "{{ action == 'rotate_right' }}"
+        sequence: !input rotate_right_action
+
+      # Command Mode Actions
+      - conditions:
+          - "{{ operation_mode == 'command' }}"
+          - "{{ action == 'toggle' }}"
+        sequence:
+          - service: light.toggle
+            target: !input target_lights
+            data:
+              transition: "{{ transition }}"
+
+      # Brightness Control
+      - conditions:
+          - "{{ operation_mode == 'command' }}"
+          - "{{ action == 'brightness_step_up' }}"
+        sequence:
+          - service: light.turn_on
+            target: !input target_lights
+            data:
+              brightness_step_pct: "{{ brightness_step }}"
+              transition: "{{ transition }}"
+
+      - conditions:
+          - "{{ operation_mode == 'command' }}"
+          - "{{ action == 'brightness_step_down' }}"
+        sequence:
+          - service: light.turn_on
+            target: !input target_lights
+            data:
+              brightness_step_pct: "-{{ brightness_step }}"
+              transition: "{{ transition }}"
+
+      # Color Temperature Control
+      - conditions:
+          - "{{ operation_mode == 'command' }}"
+          - "{{ action == 'color_temperature_step_up' }}"
+        sequence:
+          - service: light.turn_on
+            target: !input target_lights
+            data:
+              color_temp_kelvin: "{{ (state_attr(target_lights.entity_id, 'color_temp_kelvin') or 3000) + temp_step }}"
+              transition: "{{ transition }}"
+
+      - conditions:
+          - "{{ operation_mode == 'command' }}"
+          - "{{ action == 'color_temperature_step_down' }}"
+        sequence:
+          - service: light.turn_on
+            target: !input target_lights
+            data:
+              color_temp_kelvin: "{{ (state_attr(target_lights.entity_id, 'color_temp_kelvin') or 3000) - temp_step }}"
+              transition: "{{ transition }}"
+
+      # Hue Control
+      - conditions:
+          - "{{ operation_mode == 'command' }}"
+          - "{{ action == 'hue_move' }}"
+        sequence:
+          - service: light.turn_on
+            target: !input target_lights
+            data:
+              hs_color:
+                - "{{ (state_attr(target_lights.entity_id, 'hs_color')[0] or 0) + hue_step }}"
+                - "{{ state_attr(target_lights.entity_id, 'hs_color')[1] or 100 }}"
+              transition: "{{ transition }}"
+
+      - conditions:
+          - "{{ operation_mode == 'command' }}"
+          - "{{ action == 'hue_stop' }}"
+        sequence:
+          # Stop hue movement - no action needed as it's already stopped
+          - service: light.turn_on
+            target: !input target_lights
+            data: {}
+
+      # Saturation Control
+      - conditions:
+          - "{{ operation_mode == 'command' }}"
+          - "{{ action == 'saturation_move' }}"
+        sequence:
+          - service: light.turn_on
+            target: !input target_lights
+            data:
+              hs_color:
+                - "{{ state_attr(target_lights.entity_id, 'hs_color')[0] or 0 }}"
+                - "{{ (state_attr(target_lights.entity_id, 'hs_color')[1] or 100) + sat_step }}"
+              transition: "{{ transition }}"
+
+  # Optional: Log action for debugging
+  - service: persistent_notification.create
+    data:
+      title: "Rotary Switch Action"
+      message: >-
+        Action: {{ action }}
+        Mode: {{ operation_mode }}
+        Step Size: {{ step_size }}
+        Transition: {{ transition }}
+    target:
+      entity_id: !input target_lights
