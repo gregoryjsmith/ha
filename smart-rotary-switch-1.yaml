@@ -144,9 +144,17 @@ action:
               _bri_vals: "{{ expand(_on_lights) | map(attribute='attributes.brightness') | list }}"
               _bri_pcts: "{{ _bri_vals | map('float') | map('mul', 100/255) | map('round', 0) | list }}"
               _min_pct: "{{ (_bri_pcts | min(default=100)) | float }}"
-          - condition: template
-            value_template: "{{ _on_lights | length > 0 }}"
           - choose:
+              # If we cannot resolve or there are no on lights, just step down normally
+              - conditions:
+                  - "{{ _on_lights | length == 0 }}"
+                sequence:
+                  - service: light.turn_on
+                    target: !input light
+                    data:
+                      brightness_step_pct: "{{ - value }}"
+                      transition: "{{ speed }}"
+              # If stepping would cross 0, clamp to 1%
               - conditions:
                   - "{{ _min_pct <= (1 + (value | float)) }}"
                 sequence:
