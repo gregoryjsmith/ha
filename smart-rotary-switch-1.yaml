@@ -42,11 +42,6 @@ blueprint:
         target:
           entity:
             domain: light
-    # toggle:
-    #   name: Toggle (Command mode)
-    #   selector:
-    #     action:
-    #   default: []
     press_short:
       name: Short Press (Event mode)
       selector:
@@ -117,7 +112,9 @@ action:
       # Command mode: Single press as a toggle action (configurable)
       - conditions:
           - "{{ command == 'toggle' }}"
-        sequence: !input light
+        sequence:
+          - service: light.toggle
+            target: !input light
 
       # Command Mode: Dimming
       - conditions:
