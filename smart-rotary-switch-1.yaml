@@ -42,11 +42,11 @@ blueprint:
         target:
           entity:
             domain: light
-    toggle:
-      name: Toggle (Command mode)
-      selector:
-        action:
-      default: []
+    # toggle:
+    #   name: Toggle (Command mode)
+    #   selector:
+    #     action:
+    #   default: []
     press_short:
       name: Short Press (Event mode)
       selector:
@@ -72,6 +72,16 @@ blueprint:
       selector:
         action:
       default: []
+    transition_seconds:
+      name: Transition (s)
+      description: Smoothing transition time applied to brightness and color temp changes
+      default: 0.2
+      selector:
+        number:
+          min: 0
+          max: 5
+          step: 0.05
+          unit_of_measurement: "s"
 
 mode: !input mode
 max: !input max
@@ -89,6 +99,7 @@ action:
       step_size: "{{ payload_obj.action_step_size | default(payload_obj.action_step) | default(0) }}"
       transition_time_ds: "{{ payload_obj.action_transition_time | default(0) }}" # deciseconds from Z2M
       action_rate: "{{ payload_obj.action_rate | default(0) }}"
+      _transition_input: !input transition_seconds
       # Direction inference for brightness/color temp steps
       direction: >-
         {% if command in ['brightness_step_up','color_temperature_step_up'] %} up
@@ -96,19 +107,17 @@ action:
         {% else %}
         {% endif %}
       value: >-
-        {% if step_size %} {{ (step_size | float) / 2 }}
+        {% if step_size %}
+          {{ [1, [100, (((step_size | float) * 100 / 255) | round(0))] | min] | max }}
         {% else %} 0
         {% endif %}
-      speed: >-
-        {% if transition_time_ds %} {{ (transition_time_ds | float) / 10 }}
-        {% else %} 0
-        {% endif %}
+      speed: "{{ (_transition_input | float) }}"
 
   - choose:
       # Command mode: Single press as a toggle action (configurable)
       - conditions:
-          - "{{ command == 'toggle' or command == 'single' }}"
-        sequence: !input toggle
+          - "{{ command == 'toggle' }}"
+        sequence: !input light
 
       # Command Mode: Dimming
       - conditions:
