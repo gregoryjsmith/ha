@@ -1,0 +1,193 @@
+blueprint:
+  name: Zigbee2MQTT - HOBEIAN ZG-101ZD Smart Knob - Command & Event
+
+  description: >-
+    Full-featured automation for the HOBEIAN ZG-101ZD smart knob via Zigbee2MQTT
+    (command and event modes). In Command mode it can directly dim lights,
+    change color temperature and rotate hue. In Event mode you can choose
+    your own actions for clicks and rotations.
+
+  domain: automation
+
+  input:
+    mode:
+      name: Automation Mode
+      description: "https://www.home-assistant.io/docs/automation/modes/"
+      default: restart
+      selector:
+        select:
+          mode: dropdown
+          options:
+            - single
+            - restart
+            - queued
+            - parallel
+    max:
+      name: Max Executions Automation
+      description: The maximum number of executions that can be run and queued at a time.
+      default: 10
+      selector:
+        number:
+          mode: box
+          min: 1
+          max: 100
+    mqtt_topic:
+      name: Zigbee2MQTT topic
+      description: e.g. zigbee2mqtt/zg101zd (must publish JSON with action fields)
+      selector:
+        text:
+    light:
+      name: Light (Command mode)
+      selector:
+        target:
+          entity:
+            domain: light
+    toggle:
+      name: Toggle (Command mode)
+      selector:
+        action:
+      default: []
+    press_short:
+      name: Short Press (Event mode)
+      selector:
+        action:
+      default: []
+    press_double:
+      name: Double Press (Event mode)
+      selector:
+        action:
+      default: []
+    press_long:
+      name: Long Press (Event mode)
+      selector:
+        action:
+      default: []
+    rotate_left:
+      name: Rotate Left (Event mode)
+      selector:
+        action:
+      default: []
+    rotate_right:
+      name: Rotate Right (Event mode)
+      selector:
+        action:
+      default: []
+
+mode: !input mode
+max: !input max
+max_exceeded: silent
+
+trigger:
+  - platform: mqtt
+    topic: !input mqtt_topic
+
+action:
+  - variables:
+      light: !input light
+      payload_obj: "{{ trigger.payload_json if trigger.payload_json is defined else {} }}"
+      command: "{{ payload_obj.action | default(trigger.payload) }}"
+      step_size: "{{ payload_obj.action_step_size | default(payload_obj.action_step) | default(0) }}"
+      transition_time_ds: "{{ payload_obj.action_transition_time | default(0) }}" # deciseconds from Z2M
+      action_rate: "{{ payload_obj.action_rate | default(0) }}"
+      # Direction inference for brightness/color temp steps
+      direction: >-
+        {% if command in ['brightness_step_up','color_temperature_step_up'] %} up
+        {% elif command in ['brightness_step_down','color_temperature_step_down'] %} down
+        {% else %}
+        {% endif %}
+      value: >-
+        {% if step_size %} {{ (step_size | float) / 2 }}
+        {% else %} 0
+        {% endif %}
+      speed: >-
+        {% if transition_time_ds %} {{ (transition_time_ds | float) / 10 }}
+        {% else %} 0
+        {% endif %}
+
+  - choose:
+      # Command mode: Single press as a toggle action (configurable)
+      - conditions:
+          - "{{ command == 'toggle' or command == 'single' }}"
+        sequence: !input toggle
+
+      # Command Mode: Dimming
+      - conditions:
+          - "{{ command == 'brightness_step_up' }}"
+        sequence:
+          - service: light.turn_on
+            target: !input light
+            data:
+              brightness_step_pct: "{{ value }}"
+              transition: "{{ speed }}"
+      - conditions:
+          - "{{ command == 'brightness_step_down' }}"
+        sequence:
+          - service: light.turn_on
+            target: !input light
+            data:
+              brightness_step_pct: "{{ - value }}"
+              transition: "{{ speed }}"
+
+      # Command Mode: Color Temperature (increase = warmer aka higher mireds)
+      - conditions:
+          - "{{ command == 'color_temperature_step_down' }}" # cooler
+        sequence:
+          - service: light.turn_on
+            target: !input light
+            data:
+              color_temp: "{{ ( state_attr( light.entity_id, 'color_temp' ) or 300 ) - value }}"
+              transition: "{{ speed }}"
+      - conditions:
+          - "{{ command == 'color_temperature_step_up' }}" # warmer
+        sequence:
+          - service: light.turn_on
+            target: !input light
+            data:
+              color_temp: "{{ ( state_attr( light.entity_id, 'color_temp' ) or 300 ) + value }}"
+              transition: "{{ speed }}"
+
+      # Command Mode: Hue rotate until stop (best-effort with short bursts)
+      - conditions:
+          - "{{ command == 'hue_move' }}"
+        sequence:
+          - repeat:
+              while:
+                - condition: template
+                  value_template: "{{ repeat.index <= 12 }}" # ~6s total
+              sequence:
+                - service: light.turn_on
+                  target: !input light
+                  data:
+                    hs_color:
+                      - "{{ ( 15 + (state_attr( light.entity_id , 'hs_color' )[0] or 0)) % 360 }}"
+                      - "{{ (state_attr( light.entity_id , 'hs_color' )[1] or 100) }}"
+                    transition: 0.5
+                - delay:
+                    hours: 0
+                    minutes: 0
+                    seconds: 0
+                    milliseconds: 500
+      - conditions:
+          - "{{ command == 'hue_stop' }}"
+        sequence: []
+
+      # Event mode: Clicks and rotate
+      - conditions:
+          - "{{ command == 'single' }}"
+        sequence: !input press_short
+
+      - conditions:
+          - "{{ command == 'double' }}"
+        sequence: !input press_double
+
+      - conditions:
+          - "{{ command in ['hold','long'] }}"
+        sequence: !input press_long
+
+      - conditions:
+          - "{{ command == 'rotate_left' }}"
+        sequence: !input rotate_left
+
+      - conditions:
+          - "{{ command == 'rotate_right' }}"
+        sequence: !input rotate_right
