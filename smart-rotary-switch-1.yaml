@@ -77,6 +77,15 @@ blueprint:
           max: 5
           step: 0.05
           unit_of_measurement: "s"
+    value_multiplier:
+      name: Step Multiplier (x)
+      description: Multiply the device step size to change brightness/CT faster
+      default: 2
+      selector:
+        number:
+          min: 0.5
+          max: 10
+          step: 0.5
 
 mode: !input mode
 max: !input max
@@ -95,6 +104,7 @@ action:
       transition_time_ds: "{{ payload_obj.action_transition_time | default(0) }}" # deciseconds from Z2M
       action_rate: "{{ payload_obj.action_rate | default(0) }}"
       _transition_input: !input transition_seconds
+      _multiplier_input: !input value_multiplier
       # Direction inference for brightness/color temp steps
       direction: >-
         {% if command in ['brightness_step_up','color_temperature_step_up'] %} up
@@ -103,7 +113,7 @@ action:
         {% endif %}
       value: >-
         {% if step_size %}
-          {{ [1, [100, (((step_size | float) * 100 / 255) | round(0))] | min] | max }}
+          {{ [1, [100, ((((step_size | float) * 100 / 255) * (_multiplier_input | float)) | round(0))] | min] | max }}
         {% else %} 0
         {% endif %}
       speed: "{{ (_transition_input | float) }}"
