@@ -164,10 +164,12 @@ action:
                       brightness_pct: 1
                       transition: "{{ speed }}"
             default:
+              - variables:
+                  _target_pct: "{{ [1, [100, (_min_pct - (value | float))] | min] | max }}"
               - service: light.turn_on
-                target: !input light
                 data:
-                  brightness_step_pct: "{{ - value }}"
+                  entity_id: "{{ _on_lights }}"
+                  brightness_pct: "{{ _target_pct | int }}"
                   transition: "{{ speed }}"
 
       # Command Mode: Color Temperature (increase = warmer aka higher mireds)
