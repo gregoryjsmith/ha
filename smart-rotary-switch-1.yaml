@@ -128,39 +128,11 @@ action:
       - conditions:
           - "{{ command == 'brightness_step_down' }}"
         sequence:
-          - variables:
-              _light_entities: "{{ expand(light.entity_id | default([])) | selectattr('domain','eq','light') | map(attribute='entity_id') | list }}"
-              _on_lights: "{{ expand(_light_entities) | selectattr('domain','eq','light') | selectattr('state','eq','on') | map(attribute='entity_id') | list }}"
-              _bri_vals: "{{ expand(_on_lights) | map(attribute='attributes.brightness') | list }}"
-              _bri_pcts: "{{ _bri_vals | map('float') | map('mul', 100/255) | map('round', 0) | list }}"
-              _min_pct: "{{ (_bri_pcts | min(default=100)) | float }}"
-          - choose:
-              # If we cannot resolve or there are no on lights, just step down normally
-              - conditions:
-                  - "{{ _on_lights | length == 0 }}"
-                sequence:
-                  - service: light.turn_on
-                    target: !input light
-                    data:
-                      brightness_step_pct: "{{ - value }}"
-                      transition: "{{ speed }}"
-              # If stepping would cross 0, clamp to 1%
-              - conditions:
-                  - "{{ _min_pct <= (1 + (value | float)) }}"
-                sequence:
-                  - service: light.turn_on
-                    data:
-                      entity_id: "{{ _on_lights }}"
-                      brightness_pct: 1
-                      transition: "{{ speed }}"
-            default:
-              - variables:
-                  _target_pct: "{{ [1, [100, (_min_pct - (value | float))] | min] | max }}"
-              - service: light.turn_on
-                data:
-                  entity_id: "{{ _on_lights }}"
-                  brightness_pct: "{{ _target_pct | int }}"
-                  transition: "{{ speed }}"
+          - service: light.turn_on
+            target: !input light
+            data:
+              brightness_step_pct: "{{ - value }}"
+              transition: "{{ speed }}"
 
       # Command Mode: Color Temperature (increase = warmer aka higher mireds)
       - conditions:
