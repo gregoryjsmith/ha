@@ -1,14 +1,13 @@
 blueprint:
   name: Zigbee2MQTT - Tuya 1-Button Scene Switch
-  description: Automate your Tuya 1-Button Scene Switch via Zigbee2MQTT using MQTT device triggers.
+  description: Automate your Tuya 1-Button Scene Switch via Zigbee2MQTT using MQTT topic subscriptions.
   domain: automation
   input:
-    switch:
-      name: Tuya 1-Button Scene Switch
-      description: Tuya 1-Button Scene Switch to use
+    device_topic:
+      name: Device Topic
+      description: The zigbee2mqtt topic for your device (e.g., zigbee2mqtt/device_name)
       selector:
-        device:
-          integration: mqtt
+        text:
     button_one_short_press:
       name: Single Press - Button
       description: Action to run on button single press
@@ -31,29 +30,23 @@ blueprint:
 mode: restart
 max_exceeded: silent
 trigger:
-  - platform: device
-    domain: mqtt
-    device_id: !input "switch"
-    type: action
-    subtype: single
-  - platform: device
-    domain: mqtt
-    device_id: !input "switch"
-    type: action
-    subtype: double
-  - platform: device
-    domain: mqtt
-    device_id: !input "switch"
-    type: action
-    subtype: hold
+  - platform: mqtt
+    topic: !input "device_topic"
+    payload: '{"action":"single"}'
+  - platform: mqtt
+    topic: !input "device_topic"
+    payload: '{"action":"double"}'
+  - platform: mqtt
+    topic: !input "device_topic"
+    payload: '{"action":"hold"}'
 action:
   - choose:
       - conditions:
-          - "{{ trigger.type == 'action' and trigger.subtype == 'single' }}"
+          - "{{ trigger.payload_json.action == 'single' }}"
         sequence: !input "button_one_short_press"
       - conditions:
-          - "{{ trigger.type == 'action' and trigger.subtype == 'double' }}"
+          - "{{ trigger.payload_json.action == 'double' }}"
         sequence: !input "button_one_double_press"
       - conditions:
-          - "{{ trigger.type == 'action' and trigger.subtype == 'hold' }}"
+          - "{{ trigger.payload_json.action == 'hold' }}"
         sequence: !input "button_one_long_press"
