@@ -26,19 +26,11 @@ blueprint:
       default: []
       selector:
         action: {}
-  source_url: https://gist.github.com/fr3nd/2d128a932708ad2238a9439fbc256514
 mode: restart
 max_exceeded: silent
 trigger:
   - platform: mqtt
     topic: !input "device_topic"
-    payload: '{"action":"single"}'
-  - platform: mqtt
-    topic: !input "device_topic"
-    payload: '{"action":"double"}'
-  - platform: mqtt
-    topic: !input "device_topic"
-    payload: '{"action":"hold"}'
 action:
   - choose:
       - conditions:
